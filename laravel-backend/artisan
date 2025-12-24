@@ -1,0 +1,4 @@
+#!/usr/bin/env php
+<?php
+// Minimal artisan stub for local development
+echo "Laravel artisan stub - run real artisan in a full Laravel install\n";
