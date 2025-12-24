@@ -6,3 +6,5 @@ Setup:
 
 - Run `npm install` inside this folder to install dependencies.
 - Use `npm run start` to run the main script.
+
+**Note:** Dependencies were installed successfully during setup (`npm install`).

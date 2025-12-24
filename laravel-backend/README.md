@@ -11,3 +11,5 @@ Commands:
 
 - `php artisan` (if Laravel is installed)
 - `php artisan migrate` to run migrations
+
+**Note:** `composer install` was run in this scaffold and no packages were installed; if you convert this into a full Laravel project, run `composer install` and `php artisan key:generate`.
