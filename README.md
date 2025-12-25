@@ -91,22 +91,9 @@ Prerequisites:
 
 ---
 
-## Safety & secrets
-
-- **Do not commit `.env` files or secret files.** The root `.gitignore` already includes `.env`.
-- You asked specifically that `.env` and `api` must not be pushed — this repository respects that. I added a rule to ignore a top-level `/api` file (if you keep an API key in a file named `api` please keep it locally).
-
----
-
 ## Notes about what I implemented
 
 - Robust scraper (looks for pagination, scrapes the last page, extracts published date when present, cleans content).
 - SSL fallback (development-only): if the HTTP client fails due to missing CA roots, it retries with verification disabled — **do not do this in production**.
 - Node automation improved logging and detection of the local Laravel server; it also includes retries when the server is not immediately ready.
 - `process:latest` artisan command was added to simulate creating a generated (AI) article without running the Node pipeline — useful for testing.
-
----
-
-If you'd like, I can push this repository to the GitHub URL you provided and ensure `.env` and sensitive API files are not pushed. Would you like me to proceed with the push now?
-
-Thanks — and if you want the README changed or shortened, tell me how you'd like it phrased.
