@@ -6,6 +6,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 use Symfony\Component\DomCrawler\Crawler;
 use Illuminate\Support\Str;
+use Carbon\Carbon;
 
 class ArticleScraper
 {
@@ -23,8 +24,12 @@ class ArticleScraper
     }
 
     /**
-     * Scrape the 5 oldest articles from BeyondChats blog
-     * Returns array of articles with title, url, and content
+     * Scrape the N oldest articles from BeyondChats blog (default 5)
+     * Strategy:
+     *  - Discover the "last" page of the blog listing (rel="last" or highest page number)
+     *  - Scrape article links on that last page
+     *  - Fetch each article and try to extract a published date
+     *  - Sort by published date (ascending) when available and return the oldest N
      */
     public function scrapeOldestArticles(int $limit = 5): array
     {
@@ -32,40 +37,65 @@ class ArticleScraper
         $articles = [];
 
         try {
-            // Fetch the blog listing page
+            // Fetch the blog listing page (to discover pagination)
             $response = $this->fetchWithRetry($baseUrl);
             $html = $response->getBody()->getContents();
-
             $crawler = new Crawler($html);
 
-            // CSS selector for article cards on Beyond Chats blog
-            // Adjust based on actual DOM structure
-            $articleElements = $crawler->filter('article, .blog-post, .post-card, [data-article]');
-
-            if ($articleElements->count() === 0) {
-                // Fallback: try more generic selectors
-                $articleElements = $crawler->filter('a[href*="/blogs/"]')->reduce(function (Crawler $node) {
-                    $href = $node->attr('href');
-                    return $href && !str_contains($href, 'category') && !str_contains($href, 'feed');
-                });
+            // Attempt to find explicit rel="last" link
+            $lastPageUrl = null;
+            try {
+                $lastRel = $crawler->filter('a[rel="last"]')->first();
+                if ($lastRel->count() > 0 && $lastRel->attr('href')) {
+                    $lastPageUrl = $this->absoluteUrl($lastRel->attr('href'), $baseUrl);
+                }
+            } catch (\Exception $e) {
+                // ignore
             }
 
-            // Extract article links
-            $articleLinks = [];
-            $articleElements->each(function (Crawler $node) use (&$articleLinks, $baseUrl) {
-                $link = $node->attr('href') ?? $node->filter('a')->attr('href');
-                if ($link && str_starts_with($link, 'http')) {
-                    $articleLinks[] = $link;
-                } elseif ($link) {
-                    $articleLinks[] = rtrim($baseUrl, '/') . '/' . ltrim($link, '/');
+            // If rel="last" not found, look for pagination links and pick the highest page
+            if (!$lastPageUrl) {
+                $paginationLinks = $crawler->filter('a[href*="/blogs?page="]');
+                $maxPage = 0;
+                foreach ($paginationLinks as $linkNode) {
+                    $href = $linkNode->getAttribute('href');
+                    if (!$href) continue;
+                    $parts = parse_url($href);
+                    if (!empty($parts['query'])) {
+                        parse_str($parts['query'], $qs);
+                        if (!empty($qs['page']) && is_numeric($qs['page'])) {
+                            $page = (int) $qs['page'];
+                            if ($page > $maxPage) {
+                                $maxPage = $page;
+                                $lastPageUrl = $this->absoluteUrl($href, $baseUrl);
+                            }
+                        }
+                    }
                 }
+            }
+
+            // Fallback to base URL if no pagination found
+            if (!$lastPageUrl) {
+                $lastPageUrl = $baseUrl;
+            }
+
+            // Fetch the last page and extract article links
+            $pageResponse = $this->fetchWithRetry($lastPageUrl);
+            $pageHtml = $pageResponse->getBody()->getContents();
+            $pageCrawler = new Crawler($pageHtml);
+
+            $articleLinkNodes = $pageCrawler->filter('article a[href*="/blogs/"], .post-card a[href*="/blogs/"], a[href*="/blogs/"]');
+            $articleLinks = [];
+
+            $articleLinkNodes->each(function (Crawler $node) use (&$articleLinks, $lastPageUrl) {
+                $href = $node->attr('href');
+                if (!$href) return;
+                $articleLinks[] = $this->absoluteUrl($href, $lastPageUrl);
             });
 
-            // Remove duplicates and limit
-            $articleLinks = array_unique($articleLinks);
-            $articleLinks = array_slice($articleLinks, 0, $limit);
+            $articleLinks = array_values(array_unique($articleLinks));
 
-            // Scrape each article
+            // Scrape each article to get content and published date when available
             foreach ($articleLinks as $url) {
                 try {
                     $article = $this->scrapeArticleContent($url);
@@ -78,6 +108,20 @@ class ArticleScraper
                 }
             }
 
+            // If we have published dates, sort ascending to get the oldest first
+            usort($articles, function ($a, $b) {
+                $ad = $a['published_at'] ?? null;
+                $bd = $b['published_at'] ?? null;
+
+                if ($ad && $bd) {
+                    return strcmp($ad, $bd);
+                }
+                if ($ad) return -1;
+                if ($bd) return 1;
+                return 0;
+            });
+
+            // Return oldest N articles
             return array_slice($articles, 0, $limit);
 
         } catch (\Exception $e) {
@@ -129,11 +173,35 @@ class ArticleScraper
             // Clean content
             $content = $this->cleanContent($content);
 
+            // Try to extract published date when available
+            $publishedAt = null;
+            try {
+                $dateNode = $crawler->filter('meta[property="article:published_time"], meta[name="date"], time[datetime], .post-date, .published')->first();
+                if ($dateNode->count() > 0) {
+                    if ($dateNode->nodeName() === 'meta') {
+                        $dateText = $dateNode->attr('content');
+                    } else {
+                        $dateText = $dateNode->attr('datetime') ?? trim($dateNode->text());
+                    }
+
+                    if (!empty($dateText)) {
+                        try {
+                            $publishedAt = Carbon::parse($dateText)->toDateTimeString();
+                        } catch (\Exception $e) {
+                            $publishedAt = null;
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                // ignore
+            }
+
             return [
                 'title' => trim($titleText),
                 'url' => $url,
                 'content' => $content,
                 'slug' => Str::slug($titleText),
+                'published_at' => $publishedAt,
             ];
 
         } catch (\Exception $e) {
@@ -169,6 +237,25 @@ class ArticleScraper
     }
 
     /**
+     * Convert possibly relative href into absolute URL using base
+     */
+    private function absoluteUrl(string $href, string $base): string
+    {
+        // If already absolute
+        if (str_starts_with($href, 'http')) {
+            return $href;
+        }
+
+        // If protocol-relative
+        if (str_starts_with($href, '//')) {
+            return 'https:' . $href;
+        }
+
+        // Otherwise, build from base
+        return rtrim($base, '/') . '/' . ltrim($href, '/');
+    }
+
+    /**
      * Fetch URL with retry logic
      */
     private function fetchWithRetry(string $url, int $attempt = 1)
@@ -182,6 +269,25 @@ class ArticleScraper
                 'timeout' => $this->timeout,
             ]);
         } catch (RequestException $e) {
+            // Handle SSL certificate issues specially by attempting a non-verified request once
+            $msg = $e->getMessage();
+            if (str_contains($msg, 'SSL certificate') || str_contains($msg, 'cURL error 60')) {
+                try {
+                    \Log::warning('SSL certificate verification failed, retrying with verify=false', ['url' => $url, 'error' => $msg]);
+                    return $this->client->request('GET', $url, [
+                        'headers' => [
+                            'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        ],
+                        'allow_redirects' => true,
+                        'timeout' => $this->timeout,
+                        'verify' => false,
+                    ]);
+                } catch (RequestException $e2) {
+                    // fall through to normal retry behavior
+                    \Log::warning('Retry with verify=false failed', ['url' => $url, 'error' => $e2->getMessage()]);
+                }
+            }
+
             if ($attempt < $this->maxRetries) {
                 sleep(2 ** $attempt); // Exponential backoff
                 return $this->fetchWithRetry($url, $attempt + 1);

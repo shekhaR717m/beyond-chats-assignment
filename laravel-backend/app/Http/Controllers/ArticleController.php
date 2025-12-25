@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Article;
+use App\Services\ArticleScraper;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
@@ -184,5 +185,59 @@ class ArticleController extends Controller
             'success' => true,
             'data' => $article,
         ]);
+    }
+
+    /**
+     * POST /api/articles/scrape
+     * Trigger scraping of the oldest articles and store them
+     */
+    public function scrape(Request $request): JsonResponse
+    {
+        $limit = (int) $request->input('limit', 5);
+
+        try {
+            $scraper = new ArticleScraper();
+            $articles = $scraper->scrapeOldestArticles($limit);
+
+            if (empty($articles)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No articles found to scrape.',
+                ], 422);
+            }
+
+            $saved = [];
+            foreach ($articles as $articleData) {
+                // Check if article already exists
+                $existing = Article::where('slug', $articleData['slug'])->first();
+
+                if ($existing) {
+                    continue;
+                }
+
+                $article = Article::create([
+                    'title' => $articleData['title'],
+                    'slug' => $articleData['slug'],
+                    'original_url' => $articleData['url'],
+                    'original_content' => $articleData['content'],
+                    'status' => 'original',
+                ]);
+
+                $saved[] = $article;
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Scrape complete.',
+                'saved_count' => count($saved),
+                'saved' => $saved,
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Scraping failed: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 } 

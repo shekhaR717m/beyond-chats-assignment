@@ -4,3 +4,10 @@ node_modules/
 /.idea
 /.vscode
 .DS_Store
+
+# Ignore a top-level file named `api` that may contain secrets
+/api
+
+# Ignore environment variants
+.env.local
+.env.*.local

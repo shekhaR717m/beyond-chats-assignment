@@ -1,17 +1,18 @@
 {
-  "name": "beyond-chats-react-frontend",
-  "version": "0.1.0",
-  "private": true,
+  "name": "beyond-chats-frontend",
+  "version": "1.0.0",
+  "description": "React frontend for Beyond Chats article hub",
+  "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "start": "vite preview"
+    "start": "python -m http.server 3000",
+    "build": "echo 'See deployment section for build instructions'"
   },
   "dependencies": {
     "react": "^18.0.0",
     "react-dom": "^18.0.0"
   },
-  "devDependencies": {
-    "vite": "^5.0.0"
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

@@ -10,6 +10,9 @@ Route::prefix('articles')->group(function () {
     // Get latest ungenerated article
     Route::get('/latest/ungenerated', [ArticleController::class, 'getLatestUngenerated']);
 
+    // Trigger scraping and store oldest articles
+    Route::post('/scrape', [ArticleController::class, 'scrape']);
+
     // Get single article
     Route::get('/{id}', [ArticleController::class, 'show']);
 
@@ -25,5 +28,5 @@ Route::prefix('articles')->group(function () {
 
 // Health check
 Route::get('/health', function () {
-    return response()->json(['status' => 'ok']);
+    return response()->json(['status' => 'ok'], 200);
 });
